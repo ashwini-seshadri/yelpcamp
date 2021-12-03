@@ -13,13 +13,17 @@ const methodOverride = require('method-override');
 const passport = require('passport');
 const LocalStrategy = require('passport-local');
 const User = require('./models/user');
-
+const helmet = require('helmet');
+const mongoSanitize = require('express-mongo-sanitize');
 const userRoutes = require('./routes/users');
 const campgroundRoutes = require('./routes/campgrounds');
 const reviewRoutes = require('./routes/reviews');
+const MongoDBStore = require("connect-mongo");
 
 
-mongoose.connect('mongodb://localhost:27017/yelp-camp', {
+const dbUrl = process.env.DB_URL || 'mongodb://localhost:27017/yelp-camp';
+mongoose.connect(dbUrl, {
+    //useNewUrlParser: true,
     useNewUrlParser: true,
     useUnifiedTopology: true,
     //useFindAndModify: false
@@ -40,19 +44,83 @@ app.set('views', path.join(__dirname, 'views'))
 app.use(express.urlencoded({extended: true}));
 app.use(methodOverride('_method'));
 app.use(express.static(path.join(__dirname, 'public')))
+app.use(mongoSanitize({
+    replaceWith: '_'
+}))
+
+const secret = process.env.SECRET || 'jingalalasecret';
+
+const store = new MongoDBStore({
+    mongoUrl: dbUrl,
+    secret,
+    touchAfter: 24 * 60 * 60,
+});
+
+store.on("error", function(e) {
+    console.log("SESSION STORE ERROR", e)
+});
 
 const sessionConfig = {
-    secret: 'thisshouldbeabettersecret!',
+    store,
+    name: 'session',
+    secret,
     resave: false,
     saveUninitialized: true,
     cookie: {
         httpOnly: true,
+        //secure: true,
         expires: Date.now() + 1000 * 60 * 60 * 24 * 7,
         maxAge: 1000 * 60 * 60 * 24 * 7
     }
 }
 app.use(session(sessionConfig)) //session config should always be before passport
 app.use(flash());
+app.use(helmet());
+
+const scriptSrcUrls = [
+    "https://stackpath.bootstrapcdn.com/",
+    "https://api.tiles.mapbox.com/",
+    "https://api.mapbox.com/",
+    "https://kit.fontawesome.com/",
+    "https://cdnjs.cloudflare.com/",
+    "https://cdn.jsdelivr.net",
+];
+const styleSrcUrls = [
+    "https://kit-free.fontawesome.com/",
+    "https://stackpath.bootstrapcdn.com/",
+    "https://api.mapbox.com/",
+    "https://api.tiles.mapbox.com/",
+    "https://fonts.googleapis.com/",
+    "https://use.fontawesome.com/",
+];
+const connectSrcUrls = [
+    "https://api.mapbox.com/",
+    "https://a.tiles.mapbox.com/",
+    "https://b.tiles.mapbox.com/",
+    "https://events.mapbox.com/",
+];
+const fontSrcUrls = [];
+app.use(
+    helmet.contentSecurityPolicy({
+        directives: {
+            defaultSrc: [],
+            connectSrc: ["'self'", ...connectSrcUrls],
+            scriptSrc: ["'unsafe-inline'", "'self'", ...scriptSrcUrls],
+            styleSrc: ["'self'", "'unsafe-inline'", ...styleSrcUrls],
+            workerSrc: ["'self'", "blob:"],
+            objectSrc: [],
+            imgSrc: [
+                "'self'",
+                "blob:",
+                "data:",
+                "https://res.cloudinary.com/davv3rzqf/", //should match the cloudinary account 
+                "https://images.unsplash.com/",
+            ],
+            fontSrc: ["'self'", ...fontSrcUrls],
+        },
+    })
+);
+
 
 app.use(passport.initialize());
 app.use(passport.session());
@@ -62,7 +130,7 @@ passport.serializeUser(User.serializeUser()); //how to serialize user
 passport.deserializeUser(User.deserializeUser());
 
 app.use((req, res, next) => {
-    console.log(req.session)
+    //console.log(req.session)
     //if (!['/login', '/'].includes(req.originalUrl)){
     //    req.session.returnTo = req.originalUrl;
     //}
